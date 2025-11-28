@@ -1,0 +1,22 @@
+# Data Directories (Do not commit large datasets)
+Airbnb_by_city/
+parquet_data/
+yelp_by_city/
+yelp_dataset/
+yelp_parquet/
+
+# Spark & Pipeline Outputs
+checkpoint_sentiment_full/
+dashboard_data/
+nashville_investment_map_output/
+spark-warehouse/
+metastore_db/
+*.log
+
+# System & IDE Files
+.DS_Store
+__pycache__/
+.ipynb_checkpoints/
+.idea/
+.vscode/
+*.pyc
