@@ -7,6 +7,26 @@ A Big Data pipeline combining real-time sentiment analysis (Yelp/Airbnb) with ML
 1.  `yelp_parquet/`
 2.  `Airbnb_by_city/`
 
+## Accessing the Live Environment (EC2 & S3)
+We have a fully configured AWS EC2 instance with Kafka, Spark, and Data (S3) ready to go.
+
+**1. SSH into the Instance**
+*(need to have `.pem` key file)*
+```bash
+ssh -i ~/.ssh/project-key.pem ubuntu@<EC2-IP>
+```
+
+**2. Navigate to Project**
+```bash
+cd /home/ubuntu/project
+```
+
+**3. Run the Pipeline**
+Follow the **Quick Start** steps above (starting from Step 2).
+*   **S3 Data**: Already mounted/configured via environment variables.
+*   **Kafka**: Already running in Docker.
+*   **Dashboard**: Accessible at `http://<EC2-IP>:8501` after running `streamlit run dashboard.py`.
+
 ## Quick Start
 **1. Setup Environment**
 ```bash
