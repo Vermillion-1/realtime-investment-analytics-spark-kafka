@@ -1,64 +1,86 @@
 # Nashville Tourism & Investment Dashboard
 
-A Big Data pipeline combining real-time sentiment analysis (Yelp/Airbnb) with ML investment predictions.
+## Project Overview
 
-## Data Setup
-**Note:** Data is not included in this repo. Download it from [Google Drive Link] and place folders in the project root:
-1.  `yelp_parquet/`
-2.  `Airbnb_by_city/`
+### The Core Question
+**"Where are the untapped investment opportunities in Nashville's tourism market?"**
 
-## Accessing the Live Environment (EC2 & S3)
-We have a fully configured AWS EC2 instance with Kafka, Spark, and Data (S3) ready to go.
+Investors often flock to crowded areas like Broadway. This project asks: **Are there neighborhoods where tourism demand (Yelp sentiment) is high, but the supply of high-quality accommodation (Airbnb) is lagging?** We call these **"Hidden Gems"**.
 
-**1. SSH into the Instance**
-*(need to have `.pem` key file)*
-```bash
-ssh -i ~/.ssh/project-key.pem ubuntu@<EC2-IP>
-```
+### The Analysis
+We combine two massive datasets:
+1.  **Demand (Yelp)**: Real-time reviews to gauge what tourists *feel* (using **VADER Sentiment Analysis**).
+2.  **Supply (Airbnb)**: Listings data to see where they *stay* and the revenue potential.
 
-**2. Navigate to Project**
-```bash
-cd /home/ubuntu/project
-```
+**The Strategy:**
+*   **Sentiment Gap**: High Yelp Sentiment + Low Airbnb Sentiment = Opportunity.
+*   **Machine Learning**: We use **Linear Regression** to predict expected revenue. If a zone earns *more* than predicted, it's a "Hidden Gem".
+*   **Seasonality**: We track sentiment over a 30-day sliding window to capture seasonal shifts (e.g., festivals vs. winter).
 
-**3. Run the Pipeline**
-Follow the **Quick Start** steps above (starting from Step 2).
-*   **S3 Data**: Already mounted/configured via environment variables.
-*   **Kafka**: Already running in Docker.
-*   **Dashboard**: Accessible at `http://<EC2-IP>:8501` after running `streamlit run dashboard.py`.
+### Technical Architecture
+*   **Ingestion**: Kafka streams live Yelp reviews.
+*   **Processing**: Spark Structured Streaming joins live Yelp data with static Airbnb data (S3).
+*   **ML**: Spark ML (Linear Regression) clusters the city into 35 zones and predicts revenue.
+*   **Viz**: Streamlit Dashboard for real-time monitoring.
+
+---
+
+## Project Structure
+
+The repository is organized into the following logical components:
+
+### 1. Data Ingestion & Streaming
+*   `yelp_producer.py`: **Kafka Producer**. Reads Yelp Parquet data and streams it to the `yelp-reviews` topic.
+*   `sentiment_streaming.py`: **Spark Streaming Job**. Consumes Kafka stream, joins with Airbnb data, applies VADER sentiment analysis, and aggregates metrics.
+
+### 2. Machine Learning
+*   `Linear_Regression_Nashville.py`: **ML Training Script**. Loads data, clusters Nashville into 35 zones (K-Means), and trains the Linear Regression model to identify investment zones.
+*   `Nashville_Investment_GBT.py`: (Alternative) Gradient Boosted Tree model implementation.
+
+### 3. Visualization
+*   `dashboard.py`: **Streamlit App**. The frontend dashboard that visualizes the real-time "Pulse" and the "Investment Map".
+
+### 4. ETL & Utilities
+*   `split_yelp_*.py`: **ETL Scripts**. A suite of scripts used to pre-process the massive raw Yelp JSON dataset into optimized Parquet files partitioned by city.
+*   `docker-compose.yml`: Configuration for the Kafka and Zookeeper services.
+
+### 5. Automation Scripts
+*   `start_pipeline.sh`: **Master Script**. Launches Kafka, the Producer, and the Spark Streaming job in one go.
+*   `run_ml.sh`: **ML Helper**. Submits the ML training job to Spark with the necessary S3 dependencies.
+*   `setup_ec2.sh`: **Infrastructure**. Installs Docker, Java, Spark, and Python dependencies on a fresh EC2 instance.
+
+---
 
 ## Quick Start
-**1. Setup Environment**
-```bash
-pip install pyspark kafka-python pandas vaderSentiment streamlit s3fs
-sudo docker-compose up -d  # Start Kafka
-```
 
-**2. Run Pipeline (Terminal 1)**
+### 1. Data Setup
+**Note:** Large datasets are hosted externally.
+1.  Download `yelp_parquet/` and `Airbnb_by_city/` from [Google Drive Link].
+2.  Place them in the project root.
+
+### 2. Run the Pipeline
+**Terminal 1: Start Real-Time System**
 ```bash
-# Streams Yelp data & calculates real-time sentiment
 ./start_pipeline.sh
 ```
+*Starts Kafka, Producer, and Spark Streaming.*
 
-**3. Run ML & Dashboard (Terminal 2)**
+**Terminal 2: Generate Intelligence & View**
 ```bash
-# Generates investment map
-./run_ml.sh
-
-# Launches visualization
-streamlit run dashboard.py
+./run_ml.sh               # Trains model & finds Hidden Gems
+streamlit run dashboard.py # Launches Dashboard
 ```
-*Access at `http://localhost:8501` (or EC2 IP)*
+*Access at `http://localhost:8501` (or your EC2 IP).*
 
-## Architecture
-*   **Ingestion**: Kafka streams Yelp reviews.
-*   **Processing**: Spark Structured Streaming joins live Yelp data with static Airbnb data.
-*   **ML**: Linear Regression predicts "Hidden Gem" investment zones.
-*   **Viz**: Streamlit Dashboard.
+---
 
-## Files
-*   `yelp_producer.py`: Kafka Producer.
-*   `sentiment_streaming.py`: Spark Streaming Job.
-*   `Linear_Regression_Nashville.py`: ML Training.
-*   `dashboard.py`: Dashboard App.
-*   `start_pipeline.sh` / `run_ml.sh`: Automation Scripts.
+## Accessing the Live Environment
+We have a fully configured AWS EC2 instance ready for demo.
+
+**SSH Access:**
+```bash
+ssh -i "CMPT732_Project.pem" ubuntu@ec2-54-242-23-149.compute-1.amazonaws.com
+```
+
+**Web Dashboard:**
+`http://54.242.23.149:8501`
