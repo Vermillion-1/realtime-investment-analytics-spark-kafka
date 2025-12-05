@@ -55,7 +55,9 @@ The repository is organized into the following logical components:
 
 ### 1. Data Setup
 **Note:** Large datasets are hosted externally.
-1.  Download `yelp_parquet/` and `Airbnb_by_city/` from [Google Drive Link].
+1.  Download `yelp_parquet/` and `Airbnb_by_city/` from links below.
+* https://drive.google.com/drive/folders/1UIOiUyiZAXv_aqHI1Is_KrFA0mAJw4g5
+* https://drive.google.com/drive/folders/1682O09Rr-52Ev9CZqmbKDN7ii--oMDf8
 2.  Place them in the project root.
 
 ### 2. Run the Pipeline
