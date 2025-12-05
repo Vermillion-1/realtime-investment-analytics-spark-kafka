@@ -71,16 +71,3 @@ The repository is organized into the following logical components:
 streamlit run dashboard.py # Launches Dashboard
 ```
 *Access at `http://localhost:8501` (or your EC2 IP).*
-
----
-
-## Accessing the Live Environment
-We have a fully configured AWS EC2 instance ready for demo.
-
-**SSH Access:**
-```bash
-ssh -i "CMPT732_Project.pem" ubuntu@ec2-54-242-23-149.compute-1.amazonaws.com
-```
-
-**Web Dashboard:**
-`http://54.242.23.149:8501`
