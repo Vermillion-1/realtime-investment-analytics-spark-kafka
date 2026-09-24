@@ -1,0 +1,955 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nashville Tourism &amp; Investment Analytics — Technical Documentation</title>
+<meta name="description" content="A real-time Kafka + Spark Structured Streaming pipeline for Yelp sentiment, joined against Airbnb supply data, plus a batch Spark ML pipeline (K-Means + Linear Regression / GBT) that scores Nashville into 35 zones for investment potential. Architecture, streaming mechanics, modeling approach and honest limitations.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* ---------- pastel light palette (default) ---------- */
+  :root{
+    --bg:#fdfbf8; --bg-alt:#f6f1ea; --bg-code:#f4efe8;
+    --fg:#2f2d35; --fg-muted:#635f6d; --fg-faint:#918d9c;
+    --line:#e9e1d6; --line-soft:#f0e9df;
+
+    --accent:#5b7f9e; --accent-soft:#e6eef4;
+    --lilac:#7f6f9e; --lilac-soft:#eeeaf5;
+    --ok:#54876a; --ok-soft:#e6f0e9;
+    --warn:#a8813f; --warn-soft:#f7efdf;
+    --bad:#a96562; --bad-soft:#f7e9e8;
+
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    --maxw:840px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --bg:#14131a; --bg-alt:#1c1b24; --bg-code:#1e1d27;
+      --fg:#e9e6ef; --fg-muted:#a29eb0; --fg-faint:#757183;
+      --line:#2b2936; --line-soft:#232230;
+      --accent:#8fb3cc; --accent-soft:#1c2a35;
+      --lilac:#b0a2cd; --lilac-soft:#231f30;
+      --ok:#87bd9c; --ok-soft:#1a2721;
+      --warn:#dcb26c; --warn-soft:#2b2417;
+      --bad:#d99b98; --bad-soft:#2c1e1e;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#14131a; --bg-alt:#1c1b24; --bg-code:#1e1d27;
+    --fg:#e9e6ef; --fg-muted:#a29eb0; --fg-faint:#757183;
+    --line:#2b2936; --line-soft:#232230;
+    --accent:#8fb3cc; --accent-soft:#1c2a35;
+    --lilac:#b0a2cd; --lilac-soft:#231f30;
+    --ok:#87bd9c; --ok-soft:#1a2721;
+    --warn:#dcb26c; --warn-soft:#2b2417;
+    --bad:#d99b98; --bad-soft:#2c1e1e;
+  }
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth; scroll-padding-top:74px}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font-family:var(--sans); font-size:16.5px; line-height:1.68;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  nav{
+    position:sticky; top:0; z-index:50;
+    background:color-mix(in srgb,var(--bg) 90%,transparent);
+    backdrop-filter:blur(10px); border-bottom:1px solid var(--line);
+  }
+  .nav-inner{
+    max-width:1220px; margin:0 auto; padding:.6rem 1.5rem;
+    display:flex; align-items:center; gap:1.1rem; overflow-x:auto; scrollbar-width:none;
+  }
+  .nav-inner::-webkit-scrollbar{display:none}
+  .nav-inner a{
+    color:var(--fg-muted); text-decoration:none; font-size:.83rem; font-weight:500;
+    white-space:nowrap; padding:.25rem 0; border-bottom:2px solid transparent;
+  }
+  .nav-inner a:hover{color:var(--accent); border-bottom-color:var(--accent)}
+  .nav-brand{font-weight:700; color:var(--fg)!important; margin-right:.3rem; letter-spacing:-.01em}
+  #themeBtn{
+    margin-left:auto; background:none; border:1px solid var(--line); color:var(--fg-muted);
+    border-radius:7px; padding:.28rem .55rem; cursor:pointer; font-size:.85rem; line-height:1;
+  }
+  #themeBtn:hover{color:var(--accent); border-color:var(--accent)}
+
+  .shell{
+    display:grid; grid-template-columns:262px minmax(0,1fr);
+    gap:2.8rem; max-width:1220px; margin:0 auto; padding:0 1.5rem;
+  }
+  aside{
+    position:sticky; top:56px; align-self:start; max-height:calc(100vh - 72px);
+    overflow-y:auto; padding:1.8rem 0 3rem; scrollbar-width:thin;
+  }
+  aside .toc-title{
+    font-size:.68rem; text-transform:uppercase; letter-spacing:.12em;
+    color:var(--fg-faint); font-weight:600; margin:0 0 .7rem;
+  }
+  aside ul{list-style:none; padding:0; margin:0}
+  aside li{margin:0}
+  aside a{
+    display:block; padding:.34rem .7rem; font-size:.845rem;
+    color:var(--fg-muted); text-decoration:none; border-left:2px solid var(--line-soft);
+    line-height:1.38; transition:color .12s, border-color .12s, background .12s;
+  }
+  aside a:hover{color:var(--accent); border-left-color:var(--accent)}
+  aside a.lvl1{font-weight:600; color:var(--fg)}
+  aside a.lvl2{padding-left:1.5rem; font-size:.79rem}
+  aside a.active{color:var(--accent); border-left-color:var(--accent); background:var(--accent-soft)}
+  aside .toc-foot{
+    margin-top:1.4rem; padding-top:1rem; border-top:1px solid var(--line);
+    font-size:.78rem; line-height:1.55;
+  }
+  aside .toc-foot a{border:none; padding:.15rem 0; font-size:.78rem}
+  aside .toc-foot a:hover{background:none}
+  main{max-width:var(--maxw); margin:0; padding:0 0 6rem; min-width:0}
+  @media(max-width:980px){ .shell{grid-template-columns:1fr; gap:0} aside{display:none} }
+
+  section{padding-top:3.4rem}
+  h1{font-size:2.4rem; line-height:1.14; letter-spacing:-.025em; margin:0 0 .5rem}
+  h2{
+    font-size:1.5rem; letter-spacing:-.018em; margin:0 0 .3rem;
+    padding-bottom:.5rem; border-bottom:1px solid var(--line);
+  }
+  h2 .chnum{
+    font-family:var(--mono); font-size:.72rem; color:var(--fg-faint);
+    letter-spacing:.1em; display:block; margin-bottom:.35rem; font-weight:500;
+  }
+  h3{font-size:1.08rem; margin:2.1rem 0 .6rem; letter-spacing:-.008em; scroll-margin-top:76px}
+  h4{font-size:.95rem; margin:1.5rem 0 .4rem; color:var(--fg-muted)}
+  p{margin:0 0 1rem}
+  a{color:var(--accent)}
+  .lede{font-size:1.1rem; color:var(--fg-muted); margin-bottom:1.4rem}
+  .chapter-lede{color:var(--fg-muted); font-size:.98rem; margin:1rem 0 1.4rem}
+  .muted{color:var(--fg-muted)}
+  small{font-size:.85rem}
+
+  header.hero{padding:3.4rem 0 .5rem}
+  .eyebrow{
+    font-family:var(--mono); font-size:.73rem; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--lilac); margin-bottom:.7rem;
+  }
+  .stats{
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(138px,1fr));
+    gap:.7rem; margin:1.9rem 0 .5rem;
+  }
+  .stat{background:var(--bg-alt); border:1px solid var(--line); border-radius:11px; padding:.85rem .95rem}
+  .stat b{display:block; font-size:1.45rem; font-weight:700; letter-spacing:-.022em; line-height:1.1}
+  .stat span{font-size:.75rem; color:var(--fg-muted); display:block; margin-top:.25rem}
+
+  .callout{
+    border-left:3px solid var(--accent); background:var(--accent-soft);
+    padding:.9rem 1.15rem; border-radius:0 10px 10px 0; margin:1.35rem 0;
+  }
+  .callout.warn{border-left-color:var(--warn); background:var(--warn-soft)}
+  .callout.primer{border-left-color:var(--lilac); background:var(--lilac-soft)}
+  .callout.check{border-left-color:var(--ok); background:var(--ok-soft)}
+  .callout.bad{border-left-color:var(--bad); background:var(--bad-soft)}
+  .callout p:last-child{margin-bottom:0}
+  .callout strong{color:var(--fg)}
+  .callout .tag{
+    display:block; font-family:var(--mono); font-size:.68rem; letter-spacing:.1em;
+    text-transform:uppercase; color:var(--fg-faint); margin-bottom:.4rem;
+  }
+
+  table{width:100%; border-collapse:collapse; margin:1.15rem 0; font-size:.895rem; display:block; overflow-x:auto}
+  th,td{text-align:left; padding:.58rem .7rem; border-bottom:1px solid var(--line-soft); vertical-align:top}
+  th{
+    font-weight:600; font-size:.75rem; text-transform:uppercase; letter-spacing:.06em;
+    color:var(--fg-muted); border-bottom:1px solid var(--line);
+  }
+  tbody tr:hover{background:var(--bg-alt)}
+
+  code{font-family:var(--mono); font-size:.86em; background:var(--bg-code); padding:.12em .38em; border-radius:5px}
+  pre{background:var(--bg-code); border:1px solid var(--line); border-radius:10px; padding:1rem; overflow-x:auto; margin:1.15rem 0}
+  pre code{background:none; padding:0; font-size:.83rem; line-height:1.62}
+
+  .diagram{
+    background:var(--bg-alt); border:1px solid var(--line); border-radius:13px;
+    padding:1.5rem 1rem; margin:1.5rem 0; overflow-x:auto; text-align:center;
+  }
+  .diagram .mermaid{display:flex; justify-content:center; min-width:min-content}
+  .caption{font-size:.83rem; color:var(--fg-muted); margin-top:.8rem; text-align:center; line-height:1.5}
+  figure{margin:1.6rem 0; padding:0}
+  figure img{
+    width:100%; height:auto; display:block; border-radius:11px;
+    border:1px solid var(--line); background:#fff;
+  }
+  figure figcaption{font-size:.83rem; color:var(--fg-muted); margin-top:.65rem; text-align:center; line-height:1.5}
+  .shots{display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin:1.6rem 0}
+  .shots figure{margin:0}
+  @media(max-width:700px){ .shots{grid-template-columns:1fr} }
+
+  .pill{
+    display:inline-block; font-family:var(--mono); font-size:.71rem; padding:.18rem .55rem;
+    border-radius:20px; border:1px solid var(--line); background:var(--bg-alt);
+    color:var(--fg-muted); margin:0 .28rem .38rem 0;
+  }
+  .pass{color:var(--ok); font-weight:700}
+  .fail{color:var(--bad); font-weight:700}
+
+  .paths{display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:.85rem; margin:1.4rem 0}
+  .path{border:1px solid var(--line); border-radius:11px; padding:.95rem 1.05rem; background:var(--bg-alt)}
+  .path h4{margin:0 0 .35rem; color:var(--fg); font-size:.92rem}
+  .path p{font-size:.85rem; color:var(--fg-muted); margin:0}
+  .path a{font-size:.85rem}
+
+  dl.glossary{margin:1.2rem 0}
+  dl.glossary dt{font-weight:600; margin-top:1rem; font-size:.94rem}
+  dl.glossary dd{margin:.15rem 0 0; color:var(--fg-muted); font-size:.92rem}
+
+  ul,ol{padding-left:1.35rem; margin:0 0 1rem}
+  li{margin-bottom:.42rem}
+
+  footer{
+    border-top:1px solid var(--line); margin-top:4rem; padding-top:1.7rem;
+    font-size:.86rem; color:var(--fg-muted);
+  }
+  @media(max-width:640px){ h1{font-size:1.85rem} body{font-size:15.5px} .stat b{font-size:1.25rem} }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-inner">
+    <a href="#top" class="nav-brand">Nashville Analytics</a>
+    <a href="#start">Start here</a>
+    <a href="#problem">Problem</a>
+    <a href="#scope">Scope</a>
+    <a href="#architecture">Architecture</a>
+    <a href="#sentiment">Sentiment</a>
+    <a href="#investment">Investment</a>
+    <a href="#etl">ETL</a>
+    <a href="#dashboard">Dashboard</a>
+    <a href="#limits">Limitations</a>
+    <a href="#glossary">Glossary</a>
+    <button id="themeBtn" title="Toggle light / dark">◐</button>
+  </div>
+</nav>
+
+<div class="shell">
+
+<aside>
+  <p class="toc-title">Contents</p>
+  <ul>
+    <li><a class="lvl1" href="#start">Start here</a></li>
+
+    <li><a class="lvl1" href="#problem">1 · The problem</a></li>
+    <li><a class="lvl2" href="#problem-question">The core question</a></li>
+    <li><a class="lvl2" href="#problem-pivot">Why Nashville, not Vancouver</a></li>
+
+    <li><a class="lvl1" href="#scope">2 · What was built</a></li>
+    <li><a class="lvl2" href="#scope-pipelines">Two independent pipelines</a></li>
+    <li><a class="lvl2" href="#scope-data">Data sources</a></li>
+
+    <li><a class="lvl1" href="#architecture">3 · Architecture</a></li>
+    <li><a class="lvl2" href="#arch-components">Components</a></li>
+    <li><a class="lvl2" href="#arch-topology">How it fits together</a></li>
+
+    <li><a class="lvl1" href="#sentiment">4 · Real-time sentiment pipeline</a></li>
+    <li><a class="lvl2" href="#sent-static">Static phase — the Airbnb baseline</a></li>
+    <li><a class="lvl2" href="#sent-stream">Streaming phase — Yelp via Kafka</a></li>
+    <li><a class="lvl2" href="#sent-join">Stream-static join &amp; tourism status</a></li>
+
+    <li><a class="lvl1" href="#investment">5 · Investment / zone modeling</a></li>
+    <li><a class="lvl2" href="#inv-clean">Cleaning &amp; the revenue proxy</a></li>
+    <li><a class="lvl2" href="#inv-cluster">Spatial clustering — why 35 zones</a></li>
+    <li><a class="lvl2" href="#inv-features">Feature engineering by zone</a></li>
+    <li><a class="lvl2" href="#inv-model">Linear Regression vs. GBT</a></li>
+    <li><a class="lvl2" href="#inv-classify">Classifying Hidden Gems</a></li>
+
+    <li><a class="lvl1" href="#etl">6 · ETL &amp; data engineering</a></li>
+    <li><a class="lvl1" href="#dashboard">7 · The dashboard</a></li>
+    <li><a class="lvl1" href="#limits">8 · Limitations</a></li>
+    <li><a class="lvl1" href="#glossary">Glossary</a></li>
+  </ul>
+  <div class="toc-foot">
+    <a href="https://github.com/Vermillion-1/realtime-investment-analytics-spark-kafka">↗ Repository</a>
+    <a href="https://github.com/Vermillion-1/realtime-investment-analytics-spark-kafka/blob/main/CMPT-732_Project_ppt.pdf">↗ Project slides (PDF)</a>
+    <a href="https://insideairbnb.com/get-the-data/">↗ Inside Airbnb data</a>
+    <a href="https://www.yelp.com/dataset">↗ Yelp Open Dataset</a>
+  </div>
+</aside>
+
+<main id="top">
+
+<header class="hero">
+  <div class="eyebrow">Real-Time Data Systems · CMPT 732 · Team Pluto</div>
+  <h1>Nashville Tourism &amp; Investment Analytics</h1>
+  <p class="lede">
+    A Kafka + Spark Structured Streaming pipeline scores Nashville's tourism mood in real time from
+    Yelp reviews and compares it against Airbnb guest sentiment, while a separate Spark ML batch
+    pipeline clusters the city into 35 zones and predicts which ones are under-monetized relative to
+    their demand — the "Hidden Gems." Both pipelines feed a single Streamlit dashboard.
+  </p>
+  <div>
+    <span class="pill">Kafka</span><span class="pill">Spark Structured Streaming</span>
+    <span class="pill">VADER Sentiment</span><span class="pill">Spark ML — K-Means</span>
+    <span class="pill">Linear Regression / GBT</span><span class="pill">Streamlit</span>
+    <span class="pill">AWS EC2 + S3</span>
+  </div>
+  <div class="stats">
+    <div class="stat"><b>35</b><span>K-Means zones over Nashville</span></div>
+    <div class="stat"><b>30d</b><span>sliding sentiment window</span></div>
+    <div class="stat"><b>10s</b><span>streaming micro-batch trigger</span></div>
+    <div class="stat"><b>2</b><span>regression models compared</span></div>
+  </div>
+</header>
+
+<section id="start">
+  <h2><span class="chnum">Orientation</span>Start here</h2>
+
+  <p>
+    This page is the technical account of the system, written to be read straight through. Chapters
+    1–8 build up in order: the problem and why the city changed midway through, the scope boundary,
+    the architecture, how the two pipelines actually work, how the ETL feeds them, what the dashboard
+    shows, and what the results do not support.
+  </p>
+
+  <div class="paths">
+    <div class="path">
+      <h4>New to Spark / streaming?</h4>
+      <p>Read top to bottom. Concepts are introduced where they first matter, and the
+      <a href="#glossary">glossary</a> collects every term.</p>
+    </div>
+    <div class="path">
+      <h4>Just want the pipelines?</h4>
+      <p>Use the sidebar. Likely destinations:
+      <a href="#sentiment">real-time sentiment</a>,
+      <a href="#investment">zone modeling</a>.</p>
+    </div>
+    <div class="path">
+      <h4>Assessing the work?</h4>
+      <p><a href="#limits">Chapter 8</a> states plainly what these results do and do not support —
+      start there if you're grading it.</p>
+    </div>
+  </div>
+
+  <div class="callout primer">
+    <span class="tag">The project in six sentences</span>
+    <p>
+      The question is whether a neighborhood tourists love (high Yelp sentiment, lots of check-ins)
+      is under-served by short-term rentals — a gap between demand and supply that would make it a
+      good place to invest. One pipeline answers the "right now" half: a Kafka producer replays Yelp
+      reviews as a live stream, Spark Structured Streaming scores each one with VADER sentiment
+      analysis and compares a 30-day rolling window of it against a precomputed Airbnb baseline. The
+      other pipeline answers the "where" half, offline: Spark ML clusters Nashville into 35
+      geographic zones with K-Means, aggregates Yelp demand and Airbnb supply per zone, and trains a
+      regression model to predict the revenue a zone <em>should</em> generate given its popularity —
+      zones earning less than predicted are flagged as "Hidden Gems." Both write CSVs that a
+      Streamlit dashboard polls and renders.
+    </p>
+  </div>
+
+  <div class="callout warn">
+    <span class="tag">On the numbers</span>
+    <p>
+      This is coursework for CMPT 732 at Simon Fraser University, and the modeling is intentionally
+      simple — a four-feature linear model against an estimated revenue proxy, not a validated
+      forecasting system. Where a figure is a proxy or an estimate rather than a direct measurement,
+      this page says so, especially in <a href="#limits">Chapter 8</a>.
+    </p>
+  </div>
+</section>
+
+<section id="problem">
+  <h2><span class="chnum">Chapter 1</span>The problem</h2>
+  <p class="chapter-lede">Where tourism demand and rental supply disagree.</p>
+
+  <h3 id="problem-question">The core question</h3>
+  <p>
+    Short-term rental investors tend to cluster around the obvious strip — Broadway, downtown, the
+    areas everyone already knows. The project's premise is that this leaves money on the table: some
+    neighborhoods generate real tourist enthusiasm (people eating out, checking in, leaving glowing
+    reviews) without a proportional supply of Airbnb listings to capture it. Formally: is there a
+    zone where <strong>Yelp sentiment is high but Airbnb guest sentiment (or supply) lags</strong>?
+    That gap is the "Hidden Gem" signal the two pipelines are built to surface — one in near real
+    time, one as a per-zone revenue prediction.
+  </p>
+
+  <h3 id="problem-pivot">Why Nashville, not Vancouver</h3>
+  <p>
+    The project didn't start in Nashville. The ETL scripts still carry the evidence: the earliest
+    versions (<code>split_yelp_by_city.py</code>, <code>split_yelp_by_city_parquet.py</code>) filter
+    the Yelp Open Dataset down to <strong>Canadian provinces only</strong>, aimed at Vancouver. Two
+    problems forced a pivot, documented on the project's slides: live Yelp API access is rate-limited
+    and expensive, which ruled out pulling fresh Vancouver reviews; and matching Yelp business
+    records to Inside Airbnb listings ran into inconsistent neighbourhood boundaries and thin data on
+    the Canadian side. Nashville — well covered by both the historical Yelp Open Dataset and Inside
+    Airbnb, with a real short-term-rental market — gave better temporal and spatial alignment. The
+    later ETL scripts (<code>split_yelp_us.py</code>, <code>split_yelp_parquet_us.py</code>) reflect
+    that: they scan the <em>full</em> US Yelp dataset for any city with at least 100 businesses,
+    rather than filtering to Canada.
+  </p>
+</section>
+
+<section id="scope">
+  <h2><span class="chnum">Chapter 2</span>What was built</h2>
+  <p class="chapter-lede">Two pipelines that don't talk to each other, sharing one dashboard.</p>
+
+  <h3 id="scope-pipelines">Two independent pipelines</h3>
+  <p>
+    The system is not one end-to-end streaming application — it's two separate Spark jobs, run by two
+    separate shell scripts, that happen to write into the same Streamlit app.
+  </p>
+  <table>
+    <thead><tr><th>Pipeline</th><th>Nature</th><th>Entry point</th><th>Writes</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>Sentiment pulse</strong></td>
+        <td>Continuous streaming — Kafka → Spark Structured Streaming</td>
+        <td><code>start_pipeline.sh</code> → <code>sentiment_streaming.py</code></td>
+        <td><code>/home/ubuntu/dashboard_data/*.csv</code>, overwritten every micro-batch</td>
+      </tr>
+      <tr>
+        <td><strong>Investment zones</strong></td>
+        <td>One-shot batch job — Spark ML, run on demand</td>
+        <td><code>run_ml.sh</code> → <code>Linear_Regression_Nashville.py</code></td>
+        <td><code>/home/ubuntu/nashville_investment_map_output/*.csv</code>, once per run</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>
+    They share vocabulary (both work in Yelp/Airbnb terms, both used K-Means zones during
+    development) but no runtime dependency — you can run either without the other, and the dashboard
+    degrades gracefully (with a warning banner) if one hasn't produced output yet.
+  </p>
+
+  <h3 id="scope-data">Data sources</h3>
+  <table>
+    <thead><tr><th>Source</th><th>What it provides</th><th>Format on disk</th></tr></thead>
+    <tbody>
+      <tr><td><a href="https://www.yelp.com/dataset">Yelp Open Dataset</a></td><td>Business listings, reviews, check-ins — the demand side</td><td>Raw JSON → per-city JSON → partitioned Parquet</td></tr>
+      <tr><td><a href="https://insideairbnb.com/get-the-data/">Inside Airbnb</a></td><td>Listings (price, location) and guest reviews — the supply side</td><td>CSV / gzipped CSV, scraped per city by <code>scrape_airbnb.py</code></td></tr>
+    </tbody>
+  </table>
+  <p class="muted"><small>Both are staged in S3 under <code>s3a://cmpt732-pluto-project/</code> (bucket name and paths are overridable via <code>S3_BUCKET_BASE</code> and related env vars).</small></p>
+</section>
+
+<section id="architecture">
+  <h2><span class="chnum">Chapter 3</span>Architecture</h2>
+  <p class="chapter-lede">One EC2 box, one Kafka broker, five Python/PySpark programs, and a dashboard.</p>
+
+  <h3 id="arch-components">Components</h3>
+  <table>
+    <thead><tr><th>Component</th><th>Role</th></tr></thead>
+    <tbody>
+      <tr><td><code>yelp_producer.py</code></td><td>Kafka producer. Reads a Yelp review Parquet file and replays each row as a JSON message, ~20/sec, to simulate a live feed.</td></tr>
+      <tr><td><code>sentiment_streaming.py</code></td><td>Spark Structured Streaming job. Consumes the Kafka topic, scores sentiment with VADER, joins against a precomputed Airbnb baseline, writes CSV every 10s.</td></tr>
+      <tr><td><code>Linear_Regression_Nashville.py</code></td><td>Batch Spark ML job. Clusters Nashville into 35 zones, engineers per-zone features, trains a Linear Regression revenue model.</td></tr>
+      <tr><td><code>Nashville_Investment_GBT.py</code></td><td>Same pipeline, swapping in a Gradient-Boosted Tree regressor — kept as an alternative, not run by default.</td></tr>
+      <tr><td><code>dashboard.py</code></td><td>Streamlit app. Polls both pipelines' output CSVs and renders them as two tabs.</td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="arch-topology">How it fits together</h3>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart TB
+    subgraph EC2["AWS EC2 instance"]
+      direction TB
+      subgraph INFRA["Provisioning"]
+        direction LR
+        SETUP["`**setup_ec2.sh**
+Java 17 · Docker · Python deps`"]
+        COMPOSE["`**docker-compose.yml**
+Kafka + Zookeeper, 1 broker`"]
+      end
+
+      subgraph STREAM["Streaming — start_pipeline.sh"]
+        direction TB
+        PROD["`**yelp_producer.py**
+replays reviews → Kafka`"]
+        KAFKA[("Kafka
+topic: yelp-reviews")]
+        SPARK1["`**sentiment_streaming.py**
+VADER + windowed join`"]
+        PROD --> KAFKA --> SPARK1
+      end
+
+      subgraph MLJOB["Batch ML — run_ml.sh"]
+        SPARK2["`**Linear_Regression_Nashville.py**
+K-Means (35) + Linear Regression`"]
+      end
+
+      DASH["`**dashboard.py**
+Streamlit :8501`"]
+      SPARK1 -- "dashboard_data/*.csv" --> DASH
+      SPARK2 -- "investment_map_output/*.csv" --> DASH
+    end
+
+    S3[("S3
+cmpt732-pluto-project
+Yelp Parquet + Airbnb CSV")]
+    ETL["`**split_yelp_*.py**
+raw JSON → Parquet ETL`"]
+    ETL --> S3
+    S3 -.-> SPARK1
+    S3 -.-> SPARK2
+    USER(["Browser"]) -- "http://ec2-host:8501" --> DASH
+
+    style KAFKA fill:__NEUTRAL_FILL__,stroke:__NEUTRAL_STROKE__,color:__NEUTRAL_TEXT__
+    style S3 fill:__NEUTRAL_FILL__,stroke:__NEUTRAL_STROKE__,color:__NEUTRAL_TEXT__
+    style DASH fill:#5b7f9e,color:#fff,stroke:#3f6180
+    style USER fill:__NEUTRAL_FILL__,stroke:__NEUTRAL_STROKE__,color:__NEUTRAL_TEXT__
+    </pre>
+    <div class="caption">The streaming and batch pipelines run independently on the same EC2 box and
+    only meet at the dashboard, which reads whatever CSVs each has most recently written.</div>
+  </div>
+  <p class="muted"><small>Everything runs on a single VM — <code>docker-compose.yml</code> brings up
+  one Kafka broker with replication factor 1 (see <a href="#limits">Chapter 8</a>).</small></p>
+</section>
+
+<section id="sentiment">
+  <h2><span class="chnum">Chapter 4</span>Real-time sentiment pipeline</h2>
+  <p class="chapter-lede"><code>sentiment_streaming.py</code> — one Spark job with a static half and a streaming half.</p>
+
+  <p>
+    The job opens two data sources with very different lifecycles and reconciles them every
+    micro-batch. The Airbnb side is read once, scored, and cached. The Yelp side never stops.
+  </p>
+
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart LR
+    START(["Start"]) --> INIT["Init SparkSession
++ clean_text / VADER UDFs"]
+    INIT --> A1
+    INIT --> B1
+
+    subgraph STATIC["Static phase — precompute once"]
+      direction TB
+      A1["Read Airbnb listings.csv
++ reviews.csv.gz (10% sample)"] --> A2["clean_text → VADER
+compound score"] --> A3[("cached: avg sentiment
+by year_month")]
+    end
+
+    subgraph LIVE["Streaming phase — every micro-batch"]
+      direction TB
+      B1["Kafka: yelp-reviews"] --> B2["parse JSON → VADER
+compound score"] --> B3["30-day window,
+slide 1 day, watermark 2h"]
+    end
+
+    A3 --> JOIN
+    B3 --> JOIN["left-outer join
+on year_month"]
+    JOIN --> LOGIC{"tourism_status
+thresholds"}
+    LOGIC --> SINK["foreachBatch → CSV
+overwrite, every 10s"]
+    SINK --> END(["awaitTermination"])
+
+    style JOIN fill:__NEUTRAL_FILL__,stroke:__NEUTRAL_STROKE__,color:__NEUTRAL_TEXT__
+    style LOGIC fill:#a8813f,color:#fff,stroke:#83642f
+    style SINK fill:__NEUTRAL_FILL__,stroke:__NEUTRAL_STROKE__,color:__NEUTRAL_TEXT__
+    </pre>
+    <div class="caption">Static Airbnb baseline meets a live Yelp stream once per micro-batch; the
+    join key is <code>year_month</code>, not geography — see <a href="#limits">Chapter 8</a>.</div>
+  </div>
+
+  <h3 id="sent-static">Static phase — the Airbnb baseline</h3>
+  <p>
+    Before the stream starts, the job reads Nashville's Airbnb <code>listings.csv</code> and
+    <code>reviews.csv.gz</code> from S3, joins reviews to their listing, and samples
+    <strong>10% of reviews</strong> (fixed seed 42) purely to keep this precompute step fast. Each
+    comment is cleaned with a regex UDF (strips HTML tags, URLs, and collapses whitespace) and scored
+    with <a href="#glossary">VADER's</a> compound sentiment score, then averaged per
+    <code>year_month</code> and cached in memory for the life of the job. If the Airbnb load fails —
+    missing columns, unreachable S3 path — the job doesn't crash; it falls back to an empty typed
+    DataFrame so the stream still runs, just without an Airbnb comparison.
+  </p>
+
+  <h3 id="sent-stream">Streaming phase — Yelp via Kafka</h3>
+  <p>
+    <code>yelp_producer.py</code> reads a Yelp review Parquet file, sorts it by date, and replays each
+    row to the <code>yelp-reviews</code> Kafka topic as JSON with a 50ms delay (roughly 20
+    messages/sec) — this is a <em>simulated</em> real-time feed over historical data, not a live
+    firehose. On the consuming side, <code>sentiment_streaming.py</code> subscribes from
+    <code>latest</code>, parses each message against a fixed schema, cleans and scores it the same
+    way as the Airbnb text, and aggregates with a <strong>30-day sliding window advancing every
+    day</strong>, under a 2-hour watermark on event time.
+  </p>
+
+  <h3 id="sent-join">Stream-static join &amp; tourism status</h3>
+  <p>
+    Each windowed Yelp aggregate is left-outer joined to the cached Airbnb stats on
+    <code>year_month</code>, producing a <code>sentiment_gap</code>
+    (<code>airbnb_avg_sentiment − yelp_avg_sentiment</code>) and a categorical read on the local
+    market:
+  </p>
+  <table>
+    <thead><tr><th>Condition</th><th><code>tourism_status</code></th></tr></thead>
+    <tbody>
+      <tr><td>Airbnb ≥ 0.6 <strong>and</strong> Yelp ≥ 0.6</td><td>Tourism Booming (Both High)</td></tr>
+      <tr><td>Airbnb &lt; 0.5 <strong>and</strong> Yelp ≥ 0.6</td><td>Great Food, Poor Stay (Yelp &gt; Airbnb)</td></tr>
+      <tr><td>Airbnb ≥ 0.6 <strong>and</strong> Yelp &lt; 0.5</td><td>Great Stay, Bad Food (Airbnb &gt; Yelp)</td></tr>
+      <tr><td>Otherwise</td><td>Mixed / Neutral</td></tr>
+    </tbody>
+  </table>
+  <p>
+    The result is written in <code>complete</code> output mode via <code>foreachBatch</code>, coalesced
+    to a single CSV and overwritten every 10-second trigger — the dashboard always reads the latest
+    full snapshot rather than an append log.
+  </p>
+</section>
+
+<section id="investment">
+  <h2><span class="chnum">Chapter 5</span>Investment / zone modeling</h2>
+  <p class="chapter-lede"><code>Linear_Regression_Nashville.py</code> — a one-shot batch job, run separately from the stream.</p>
+
+  <h3 id="inv-clean">Cleaning &amp; the revenue proxy</h3>
+  <p>
+    Airbnb's <code>price</code> column arrives as a currency string (<code>"$120.00"</code>); it's
+    stripped of <code>$</code>/<code>,</code> and cast to a float. There is no bookings or occupancy
+    field in the dataset, so the job approximates monthly revenue as:
+  </p>
+  <pre><code>est_monthly_revenue = price_clean * reviews_per_month</code></pre>
+  <p>
+    This treats "reviews per month" as a stand-in for "bookings per month," which is the standard
+    Inside Airbnb approximation — useful for relative comparison between zones, not a real revenue
+    figure. Yelp's <code>checkin</code> records store comma-separated timestamp strings per business;
+    <code>checkin_count</code> is just the length of that list after splitting on commas.
+  </p>
+
+  <h3 id="inv-cluster">Spatial clustering — why 35 zones</h3>
+  <p>
+    Nashville has no clean, pre-existing neighborhood key that both Yelp and Airbnb agree on, so the
+    project defines its own zones geometrically: every Yelp business coordinate and every Airbnb
+    listing coordinate is pooled and clustered with <strong>K-Means, k=35</strong>. The fitted model
+    is then reused to assign a <code>zone_id</code> to both datasets independently, and its 35 cluster
+    centers become the map points the dashboard plots.
+  </p>
+  <figure>
+    <img src="assets/elbow_plot.png" alt="Elbow method plot: within-cluster sum of squares (cost) against number of zones k, from 10 to 105, generated by Optimal_zones.py. The curve is steep below k=30 and flattens beyond it.">
+    <figcaption><code>Optimal_zones.py</code> sweeps k from 10 to 105 and plots WCSS to find where
+    adding zones stops meaningfully reducing spread — the elbow method behind the k=35 choice.</figcaption>
+  </figure>
+  <div class="callout warn">
+    <span class="tag">A discrepancy worth flagging</span>
+    <p>
+      The elbow plot committed to the repo annotates a dashed line at <strong>k=50</strong>, not the
+      k=35 that <code>Linear_Regression_Nashville.py</code> actually uses. The two weren't
+      regenerated together — the plot appears to be from an earlier pass of the analysis before the
+      team settled on 35. The curve itself still supports 35 as a reasonable elbow; the annotation
+      just wasn't updated to match.
+    </p>
+  </div>
+
+  <h3 id="inv-features">Feature engineering by zone</h3>
+  <p>Once every business and listing carries a <code>zone_id</code>, both sides are aggregated independently and joined:</p>
+  <table>
+    <thead><tr><th>Side</th><th>Feature</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td rowspan="4">Demand (Yelp)</td><td><code>total_businesses</code></td><td>Count of businesses in the zone</td></tr>
+      <tr><td><code>avg_biz_stars</code></td><td>Mean Yelp star rating</td></tr>
+      <tr><td><code>total_biz_reviews</code></td><td>Sum of Yelp review counts</td></tr>
+      <tr><td><code>total_checkins</code></td><td>Sum of parsed check-in counts</td></tr>
+      <tr><td rowspan="3">Supply (Airbnb)</td><td><code>airbnb_listing_count</code></td><td>Distinct listings in the zone</td></tr>
+      <tr><td><code>avg_nightly_price</code></td><td>Mean cleaned nightly price</td></tr>
+      <tr><td><code>avg_actual_revenue</code></td><td>Mean <code>est_monthly_revenue</code> — the regression label</td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="inv-model">Linear Regression vs. GBT</h3>
+  <p>
+    The primary model is a Spark ML <code>LinearRegression</code> (<code>regParam=0.1</code>) trained
+    on the four demand features above, predicting <code>avg_actual_revenue</code>. An alternate script,
+    <code>Nashville_Investment_GBT.py</code>, swaps in a <code>GBTRegressor</code>
+    (<code>maxIter=50</code>) over the identical feature set and prints feature importances instead of
+    coefficients — kept for comparison, not wired into <code>run_ml.sh</code> by default. Note the two
+    scripts also default to different output paths (local disk for the Linear Regression version, an
+    S3 path for the GBT version) — switching models means reconciling that path, not just the
+    algorithm.
+  </p>
+
+  <h3 id="inv-classify">Classifying Hidden Gems</h3>
+  <p>The model's prediction is compared against the zone's actual estimated revenue:</p>
+  <pre><code>investment_potential_score = predicted_revenue - avg_actual_revenue
+
+market_status =
+    "Hidden Gem (Invest)"   if investment_potential_score > 100
+    "Saturated (Avoid)"     if investment_potential_score < -100
+    "Balanced Market"       otherwise</code></pre>
+  <p>
+    A zone whose demand signals (businesses, ratings, reviews, check-ins) predict more revenue than
+    it's currently capturing is a Hidden Gem — undersupplied relative to its popularity. The ±100
+    threshold is a fixed dollar cutoff, not derived from the data's variance — see
+    <a href="#limits">Chapter 8</a>.
+  </p>
+</section>
+
+<section id="etl">
+  <h2><span class="chnum">Chapter 6</span>ETL &amp; data engineering</h2>
+  <p class="chapter-lede">Two stages, each with a Canada-only prototype and a US-wide successor.</p>
+  <p>
+    The Yelp Open Dataset ships as a handful of enormous line-delimited JSON files covering every
+    city Yelp operates in. Getting from that to "Nashville business.parquet" is a two-stage process,
+    and the repo keeps both generations of scripts — from before and after the pivot described in
+    <a href="#problem-pivot">Chapter 1</a>.
+  </p>
+  <table>
+    <thead><tr><th>Stage</th><th>Script</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr>
+        <td rowspan="2">1. Raw JSON → per-city JSON<br><small class="muted">pure Python, single pass, no Spark</small></td>
+        <td><code>split_yelp_by_city.py</code></td>
+        <td>Prototype. Filters to Canadian provinces only, splits business/review/user/etc. JSON by city.</td>
+      </tr>
+      <tr>
+        <td><code>split_yelp_us.py</code></td>
+        <td>Successor. Scans all 50 US states, keeps any city with ≥100 businesses, maps users to
+        cities via their reviews before splitting <code>user.json</code>.</td>
+      </tr>
+      <tr>
+        <td rowspan="2">2. Per-city JSON → partitioned Parquet<br><small class="muted">PySpark</small></td>
+        <td><code>split_yelp_by_city_parquet.py</code></td>
+        <td>Prototype. Converts each city's JSON files to Parquet — business partitioned by
+        <code>state</code>, review by <code>year</code>, photo by <code>label</code>.</td>
+      </tr>
+      <tr>
+        <td><code>split_yelp_parquet_us.py</code></td>
+        <td>Successor. Same partitioning scheme, plus an explicit review schema to skip Spark's
+        (costly) schema inference over the larger US-wide dataset.</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>
+    <code>scrape_airbnb.py</code> handles the other side: it scrapes
+    <a href="https://insideairbnb.com/get-the-data/">insideairbnb.com/get-the-data</a> for every
+    US and Canadian city with published data and downloads each city's CSV/CSV.gz files locally —
+    the raw material for <code>scope-data</code>'s Airbnb side.
+  </p>
+</section>
+
+<section id="dashboard">
+  <h2><span class="chnum">Chapter 7</span>The dashboard</h2>
+  <p class="chapter-lede"><code>dashboard.py</code> — a two-tab Streamlit app that polls both pipelines' CSV output.</p>
+  <table>
+    <thead><tr><th>Tab</th><th>Source</th><th>Shows</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>📡 Live Sentiment Pulse</td>
+        <td><code>dashboard_data/*.csv</code>, polled every 5s in a live loop</td>
+        <td>Current month, Yelp vs. Airbnb sentiment metrics, a colored status banner from
+        <code>tourism_status</code>, the historical table, and a line chart of both sentiment series
+        over time.</td>
+      </tr>
+      <tr>
+        <td>💰 Investment Opportunities</td>
+        <td><code>nashville_investment_map_output/*.csv</code>, read once per page load</td>
+        <td>The full 35-zone table plus an <code>st.map()</code> of zone centers.</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>
+    The map is a plain point scatter — <code>st.map()</code> doesn't color-code by
+    <code>market_status</code>, so "Hidden Gem" vs. "Saturated" zones are only distinguishable in the
+    adjacent table, not visually on the map itself.
+  </p>
+</section>
+
+<section id="limits">
+  <h2><span class="chnum">Chapter 8</span>Limitations</h2>
+  <p class="chapter-lede">What this does and doesn't demonstrate.</p>
+  <ul>
+    <li><strong>Revenue is a proxy, not a measurement.</strong> <code>price × reviews_per_month</code>
+    is Inside Airbnb's standard approximation for occupancy-driven revenue, not actual booking or
+    payout data. Every downstream number — the regression label, the investment score, the Hidden
+    Gem/Saturated classification — inherits that uncertainty.</li>
+    <li><strong>The join key is time, not geography.</strong> The sentiment pipeline compares Yelp and
+    Airbnb sentiment by <code>year_month</code> city-wide; it never joins to a <code>zone_id</code>,
+    so the "live pulse" tab and the "investment zones" tab answer related but structurally separate
+    questions and can't be cross-filtered.</li>
+    <li><strong>The stream is simulated.</strong> <code>yelp_producer.py</code> replays historical,
+    already-collected reviews at a fixed rate — it demonstrates the streaming architecture correctly,
+    but it is not consuming a live Yelp firehose.</li>
+    <li><strong>Single-broker Kafka, no replication.</strong> <code>docker-compose.yml</code> runs one
+    Kafka broker with <code>OFFSETS_TOPIC_REPLICATION_FACTOR=1</code> — fine for a course project,
+    not a durability story.</li>
+    <li><strong>Fixed, unvalidated thresholds.</strong> The ±100 investment-score cutoff and the
+    0.5/0.6 sentiment bands are hand-picked constants, not derived from the data's own distribution
+    or validated against known-good zones.</li>
+    <li><strong>Four-feature linear model.</strong> <code>total_businesses</code>,
+    <code>avg_biz_stars</code>, <code>total_biz_reviews</code>, <code>total_checkins</code> predict
+    revenue with light regularization (<code>regParam=0.1</code>) and no train/test split reported in
+    the script — treat the coefficients as descriptive, not as a validated forecast.</li>
+    <li><strong>Elbow plot / final k mismatch.</strong> See the callout in
+    <a href="#inv-cluster">§5.2</a> — the committed plot annotates k=50, the pipeline uses k=35.</li>
+    <li><strong>Hardcoded, single-host paths.</strong> Output paths like
+    <code>/home/ubuntu/dashboard_data</code> assume a specific EC2 user and instance; running this
+    anywhere else means editing paths in three scripts.</li>
+  </ul>
+</section>
+
+<section id="glossary">
+  <h2><span class="chnum">Reference</span>Glossary</h2>
+  <dl class="glossary">
+    <dt>Kafka</dt>
+    <dd>A distributed log/message broker. Here, a single-node broker holding one topic
+    (<code>yelp-reviews</code>) that decouples the producer replaying data from the Spark job consuming it.</dd>
+
+    <dt>Spark Structured Streaming</dt>
+    <dd>Spark's API for treating a continuous data source as an unbounded table, processed in
+    repeated micro-batches (here, every 10 seconds).</dd>
+
+    <dt>Watermark</dt>
+    <dd>A bound on how late an event can arrive and still be included in its time window. Set to 2
+    hours here — events older than that relative to the latest seen timestamp are dropped from
+    windowed aggregation.</dd>
+
+    <dt>Sliding window</dt>
+    <dd>A time window that overlaps with its neighbors. A 30-day window sliding every 1 day means a
+    new 30-day aggregate is emitted daily, each overlapping the previous by 29 days.</dd>
+
+    <dt>VADER</dt>
+    <dd>Valence Aware Dictionary and sEntiment Reasoner — a lexicon-and-rules sentiment model tuned
+    for short, informal text. Returns a compound score from -1 (most negative) to +1 (most positive);
+    used here via <code>polarity_scores(...)["compound"]</code>.</dd>
+
+    <dt>K-Means</dt>
+    <dd>An unsupervised clustering algorithm that partitions points into <em>k</em> groups by
+    minimizing distance to each group's centroid. Applied here to (latitude, longitude) pairs to
+    define geographic "zones" with no other data input.</dd>
+
+    <dt>Elbow method</dt>
+    <dd>A heuristic for picking <em>k</em> in K-Means: plot the within-cluster sum of squares (cost)
+    against k and look for the point where additional clusters stop meaningfully reducing it.</dd>
+
+    <dt>GBT (Gradient-Boosted Trees)</dt>
+    <dd>An ensemble regression model that builds decision trees sequentially, each correcting the
+    previous ensemble's errors. Used here as an alternative to Linear Regression for revenue prediction.</dd>
+
+    <dt>coalesce(1)</dt>
+    <dd>A Spark call that merges all partitions of a DataFrame into one before writing — used
+    throughout this project to force a single output CSV file instead of Spark's default
+    multi-part output.</dd>
+
+    <dt>Checkpoint location</dt>
+    <dd>A directory where Structured Streaming persists its progress (offsets, state) so a restarted
+    query resumes rather than reprocessing from scratch.</dd>
+  </dl>
+</section>
+
+<footer>
+  <p>
+    <strong>Nashville Tourism &amp; Investment Analytics</strong> — a group project ("Team Pluto") for
+    CMPT 732: Big Data I at Simon Fraser University, built on the
+    <a href="https://www.yelp.com/dataset">Yelp Open Dataset</a> and
+    <a href="https://insideairbnb.com/">Inside Airbnb</a>.
+  </p>
+  <p>
+    <a href="https://github.com/Vermillion-1/realtime-investment-analytics-spark-kafka">Repository</a> ·
+    <a href="https://github.com/Vermillion-1/realtime-investment-analytics-spark-kafka/blob/main/CMPT-732_Project_ppt.pdf">Project slides</a> ·
+    <a href="https://insideairbnb.com/get-the-data/">Inside Airbnb data</a> ·
+    <a href="https://www.yelp.com/dataset">Yelp Open Dataset</a>
+  </p>
+</footer>
+
+</main>
+</div>
+
+<script type="module">
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+
+const root = document.documentElement;
+const stored = localStorage.getItem('theme');
+if (stored) root.setAttribute('data-theme', stored);
+
+const isDark = () => {
+  const t = root.getAttribute('data-theme');
+  if (t) return t === 'dark';
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+};
+
+const sources = [...document.querySelectorAll('pre.mermaid')].map(el => el.textContent);
+
+async function render() {
+  const dark = isDark();
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: dark ? 'dark' : 'base',
+    // Multi-line node labels use mermaid's backtick markdown-string syntax.
+    // Plain <br>/<small> HTML in labels is stripped by mermaid v11's markdown
+    // pass and collapses into one run-on string. markdownAutoWrap must also be
+    // false, or the markdown pass folds the newlines back into one paragraph.
+    markdownAutoWrap: false,
+    flowchart: { curve: 'basis', htmlLabels: true, padding: 12 },
+    sequence: { actorMargin: 42, width: 150 },
+    themeVariables: dark
+      ? { fontFamily: 'Inter, sans-serif', fontSize: '14px' }
+      : {
+          fontFamily: 'Inter, sans-serif', fontSize: '14px',
+          background: '#f6f1ea',
+          primaryColor: '#dfe9f1', primaryTextColor: '#2f2d35', primaryBorderColor: '#a9c2d3',
+          lineColor: '#918d9c', textColor: '#2f2d35',
+          secondaryColor: '#eeeaf5', tertiaryColor: '#f4efe8',
+          clusterBkg: '#fdfbf8', clusterBorder: '#e9e1d6'
+        }
+  });
+  const palette = dark
+    ? { NEUTRAL_FILL: '#26384a', NEUTRAL_STROKE: '#456781', NEUTRAL_TEXT: '#e9e6ef' }
+    : { NEUTRAL_FILL: '#dfe9f1', NEUTRAL_STROKE: '#a9c2d3', NEUTRAL_TEXT: '#2f2d35' };
+
+  const nodes = document.querySelectorAll('pre.mermaid');
+  for (let i = 0; i < nodes.length; i++) {
+    const id = 'mmd-' + i + '-' + Date.now();
+    let src = sources[i];
+    for (const [k, v] of Object.entries(palette)) {
+      src = src.replaceAll('__' + k + '__', v);
+    }
+    try {
+      const { svg } = await mermaid.render(id, src);
+      nodes[i].innerHTML = svg;
+      nodes[i].removeAttribute('data-processed');
+    } catch (e) {
+      nodes[i].innerHTML = '<small style="color:var(--fg-muted)">diagram failed to render</small>';
+    }
+  }
+}
+render();
+
+// scroll-spy across both sidebar heading levels
+const tocLinks = [...document.querySelectorAll('aside a[href^="#"]')];
+const targets  = tocLinks
+  .map(a => ({ link: a, el: document.querySelector(a.getAttribute('href')) }))
+  .filter(t => t.el);
+
+if (targets.length) {
+  const onScroll = () => {
+    const y = window.scrollY + 90;
+    let current = targets[0];
+    for (const t of targets) if (t.el.offsetTop <= y) current = t;
+    tocLinks.forEach(a => a.classList.toggle('active', a === current.link));
+    const aside = document.querySelector('aside');
+    const r = current.link.getBoundingClientRect();
+    const ar = aside.getBoundingClientRect();
+    if (r.top < ar.top || r.bottom > ar.bottom) current.link.scrollIntoView({ block: 'nearest' });
+  };
+  let ticking = false;
+  window.addEventListener('scroll', () => {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => { onScroll(); ticking = false; });
+  }, { passive: true });
+  onScroll();
+}
+
+document.getElementById('themeBtn').addEventListener('click', () => {
+  const next = isDark() ? 'light' : 'dark';
+  root.setAttribute('data-theme', next);
+  localStorage.setItem('theme', next);
+  render();
+});
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if (!root.getAttribute('data-theme')) render();
+});
+</script>
+</body>
+</html>

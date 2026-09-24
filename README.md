@@ -1,5 +1,10 @@
 # Nashville Tourism & Investment Dashboard
 
+📖 **[Read the full technical documentation →](https://vermillion-1.github.io/realtime-investment-analytics-spark-kafka/)**  
+<sub>Architecture, the real-time sentiment pipeline, the zone-clustering investment model, ETL, and known limitations — with diagrams.</sub>
+
+---
+
 ## Project Overview
 
 ### The Core Question
